@@ -1,0 +1,10 @@
+HSPLcom/liquidkit/swiftgallery/**;->*(**)
+HSPLio/liquidkit/**;->*(**)
+HSPLcom/kyant/backdrop/**;->*(**)
+Lcom/liquidkit/swiftgallery/**
+Lio/liquidkit/**
+Lcom/kyant/backdrop/**
+Landroidx/compose/runtime/**
+Landroidx/compose/ui/**
+Landroidx/compose/foundation/**
+Landroidx/compose/animation/**

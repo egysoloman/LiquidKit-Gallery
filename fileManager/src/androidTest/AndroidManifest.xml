@@ -1,0 +1,5 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <instrumentation
+        android:name="com.kyant.foldfiles.probe.ToolbarPressCapture"
+        android:targetPackage="com.kyant.foldfiles" />
+</manifest>

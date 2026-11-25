@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="true"
+        android:enableOnBackInvokedCallback="true"
+        android:label="LiquidKit Demos"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+
+        <activity
+            android:name=".music.GlassMusicActivity"
+            android:exported="true"
+            android:label="流光音乐"
+            android:taskAffinity="com.liquidkit.demos.music"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".weather.GlassWeatherActivity"
+            android:exported="true"
+            android:label="晴雨气象"
+            android:taskAffinity="com.liquidkit.demos.weather"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".control.GlassControlActivity"
+            android:exported="true"
+            android:label="智能中枢"
+            android:taskAffinity="com.liquidkit.demos.control"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

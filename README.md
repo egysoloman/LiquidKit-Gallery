@@ -4,7 +4,7 @@ Android Jetpack Compose component gallery showcasing **LiquidKit** UI components
 
 ## Download
 
-- **APK**: [LiquidKit-Gallery.apk](./LiquidKit-Gallery.apk)
+- **APK**: [GitHub Releases](https://github.com/egysoloman/LiquidKit-Gallery/releases/latest)
 
 ## Highlights
 
