@@ -41,7 +41,9 @@ float sdRoundedRect(float2 coord, float2 halfSize, float radius) {
 float2 gradSdRoundedRect(float2 coord, float2 halfSize, float radius) {
     float2 cornerCoord = abs(coord) - (halfSize - float2(radius));
     if (cornerCoord.x >= 0.0 || cornerCoord.y >= 0.0) {
-        return sign(coord) * normalize(max(cornerCoord, 0.0));
+        float2 m = max(cornerCoord, 0.0);
+        float len = length(m);
+        return len > 1e-5 ? sign(coord) * (m / len) : sign(coord) * float2(0.70710678);
     } else {
         float gradX = step(cornerCoord.y, cornerCoord.x);
         return sign(coord) * float2(gradX, 1.0 - gradX);

@@ -1,7 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.INTERNET" />
     <application
-        android:label="SwiftUI Gallery"
+        android:label="LiquidKit Gallery"
         android:supportsRtl="true"
         android:enableOnBackInvokedCallback="true"
         android:usesCleartextTraffic="true"

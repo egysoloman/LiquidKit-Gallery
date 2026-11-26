@@ -103,7 +103,7 @@ fun SwiftGalleryHomeView(
     val chromeKey = if (visualRoute != null) visualRouteName else "tab-${activeTab.name}"
     val activeChrome = chromeByRoute[chromeKey] ?: LiquidKitPinnedNavChrome(
         title = visualRoute?.let { ComponentCatalog.item(it)?.title } ?: when (activeTab) {
-            GalleryTab.Gallery -> "SwiftUI Gallery"
+            GalleryTab.Gallery -> "LiquidKit Gallery"
             GalleryTab.Ios27 -> "iOS 27 & Glass"
             GalleryTab.Search -> "搜索组件"
         },
@@ -405,7 +405,7 @@ private fun GalleryBrowseView(
         val columns = ((maxWidth - 32.dp + 10.dp) / 168.dp).toInt().coerceIn(2, 4)
         val categoryRows = remember(columns) { ComponentCategory.entries.chunked(columns) }
         LiquidKitNavigationScaffold(
-            title = "SwiftUI Gallery",
+            title = "LiquidKit Gallery",
             modifier = Modifier.fillMaxSize(),
             backdrop = backdrop,
             scrollState = listState,
@@ -580,7 +580,9 @@ private fun Ios27SpotlightView(
     val listState = rememberLazyListState()
     val spotlightItems = remember { ComponentCatalog.allItems.filter { it.badge != null } }
 
-    val isScrolledDeep by remember { derivedStateOf { listState.firstVisibleItemIndex >= 2 } }
+    val isScrolledDeep by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 60 }
+    }
     LaunchedEffect(isScrolledDeep) { onScrollMinimize(isScrolledDeep) }
 
     LiquidKitNavigationScaffold(
@@ -699,7 +701,9 @@ private fun SearchGalleryView(
     val backdrop = LocalLiquidKitBackdrop.current
     val listState = rememberLazyListState()
 
-    val isScrolledDeep by remember { derivedStateOf { listState.firstVisibleItemIndex >= 2 } }
+    val isScrolledDeep by remember {
+        derivedStateOf { listState.firstVisibleItemIndex > 0 || listState.firstVisibleItemScrollOffset > 60 }
+    }
     LaunchedEffect(isScrolledDeep) { onScrollMinimize(isScrolledDeep) }
 
     val filtered = remember(query) {

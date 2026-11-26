@@ -141,7 +141,8 @@ fun LiquidActionButton(
     }
     val appearance = liquidGlassAppearance()
     val glassStyle = style == LiquidActionStyle.Glass || style == LiquidActionStyle.GlassProminent
-    val resolvedBackdrop = LocalLiquidSurfaceBackdrop.current ?: backdrop
+    val rawBackdrop = LocalLiquidSurfaceBackdrop.current ?: backdrop
+    val resolvedBackdrop = rawBackdrop?.takeUnless { it === com.kyant.backdrop.backdrops.emptyBackdrop() }
     if (glassStyle && resolvedBackdrop != null) {
         val scope = rememberCoroutineScope()
         val tokens = LocalLiquidGlassTokens.current
@@ -154,6 +155,7 @@ fun LiquidActionButton(
             )
         }
         val motion = group ?: interactive.motion
+        val localHighlightMotion = if (group != null) rememberControlPress() else null
         val rim = rememberLiquidRimHighlight(dark)
         val accentTint = resolvedTint
         val chromaticTint = (maxOf(accentTint.red, accentTint.green, accentTint.blue) - minOf(accentTint.red, accentTint.green, accentTint.blue)) > 0.05f
@@ -174,6 +176,18 @@ fun LiquidActionButton(
         }
         val contentAlpha = if (enabled) 1f else .45f
         val scale = if (group == null && enabled) Modifier.graphicsLayer { motion.apply(this) } else Modifier
+        var drawGroupDivider by remember { mutableStateOf(false) }
+        val groupSeparator = (LocalListColors.current ?: liquidListColors()).separator.copy(alpha = .68f)
+        val groupDividerModifier = if (group != null) {
+            Modifier.onGloballyPositioned { drawGroupDivider = it.positionInParent().x > 4f }
+                .drawBehind {
+                    if (drawGroupDivider) {
+                        val insetY = size.height * 0.22f
+                        drawLine(groupSeparator, Offset(0f, insetY), Offset(0f, size.height - insetY), strokeWidth = .75.dp.toPx())
+                    }
+                }
+        } else Modifier
+        val drawShape = if (group != null) RectangleShape else resolvedShape
         val sizeMod = if (isCircleIconOnly) Modifier.size(sizeMinH)
         else Modifier.defaultMinSize(minWidth = 44.dp, minHeight = sizeMinH).padding(horizontal = sizeHPad, vertical = sizeVPad)
         val hasShader = com.kyant.backdrop.isRuntimeShaderSupported()
@@ -181,13 +195,16 @@ fun LiquidActionButton(
             !enabled -> Modifier
             group == null -> interactive.gestureModifier
             else -> Modifier.observeControlPress(motion, enabled = true)
+                .let { mod -> if (localHighlightMotion != null) mod.observeControlPress(localHighlightMotion, enabled = true) else mod }
         }
-        Box(modifier.then(pressMod)
+        val highlightAlpha = LocalLiquidGlassTokens.current.press.actionHighlightAlpha
+        val pressTint = if (prominent || dark) Color.White else ink
+        Box(modifier.then(groupDividerModifier).then(pressMod)
             .clickable(interactionSource = null, indication = null, enabled = enabled, role = Role.Button, onClick = onClick)
             .then(scale)
             .drawBackdrop(
                 backdrop = resolvedBackdrop,
-                shape = { resolvedShape },
+                shape = { drawShape },
                 effects = { liquidSurfaceLens(appearance.controlBlurRadius, appearance, LiquidGlassRole.Control) },
                 highlight = { rim },
                 shadow = { LiquidSurfaceShadow },
@@ -198,7 +215,13 @@ fun LiquidActionButton(
                     } else if (!hasShader || translucentProminent || whiteLabeledGlass) {
                         drawRect(surfaceFill.copy(alpha = surfaceFill.alpha * if (enabled) 1f else .52f))
                     }
-                    if (enabled && group == null) interactive.drawLight(this, brightenBackdrop = !dark && !prominent)
+                    if (enabled) {
+                        if (group == null) {
+                            interactive.drawLight(this, brightenBackdrop = !dark && !prominent)
+                        } else if (localHighlightMotion != null && localHighlightMotion.progress > 0f) {
+                            drawRect(pressTint.copy(alpha = highlightAlpha * localHighlightMotion.highlightProgress))
+                        }
+                    }
                 },
             )
             .then(sizeMod),
@@ -216,19 +239,21 @@ fun LiquidActionButton(
     val localHighlightMotion = if (group != null) rememberControlPress() else motion
     val highlight = LocalLiquidGlassTokens.current.press.actionHighlightAlpha
     val accentTint = resolvedTint
-    val ink = when (style) {
+    val targetInk = when (style) {
         LiquidActionStyle.Filled, LiquidActionStyle.GlassProminent -> liquidContentColorFor(accentTint)
         LiquidActionStyle.Glass -> if (destructive) resolvedTint else if (tint.isSpecified) tint else appearance.contentColor
         else -> accentTint
     }
+    val ink by animateColorAsState(targetInk, tween(150), label = "ActionButton ink")
     val pressTint = if (style == LiquidActionStyle.Filled || style == LiquidActionStyle.GlassProminent || (dark && style == LiquidActionStyle.Tinted)) Color.White else ink
-    val base = when (style) {
+    val targetBase = when (style) {
         LiquidActionStyle.Plain, LiquidActionStyle.Borderless -> Color.Transparent
         LiquidActionStyle.Tinted -> accentTint.copy(alpha = .05f).compositeOver(if (dark) Color(0xff36363a) else Color(0xffebecef))
         LiquidActionStyle.Filled -> accentTint
         LiquidActionStyle.Glass -> appearance.surface
         LiquidActionStyle.GlassProminent -> accentTint.copy(alpha = if (dark) .74f else .84f)
     }
+    val base by animateColorAsState(targetBase, tween(150), label = "ActionButton base")
     val glassBorder = if (glassStyle) Modifier.border(.6.dp, Color.White.copy(alpha = if (dark) .22f else .48f), resolvedShape) else Modifier
     val scale = if (group == null && enabled) Modifier.graphicsLayer { motion.apply(this) } else Modifier
     val contentAlpha = if (enabled) 1f else .45f
@@ -295,14 +320,18 @@ fun LiquidToggleButton(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    tint: Color = Color(0xff007aff),
+    tint: Color = Color.Unspecified,
     leadingSymbol: LiquidSymbol? = null,
     enabled: Boolean = true,
     controlSize: LiquidControlSize = LiquidControlSize.Regular,
 ) {
+    val haptics = rememberLiquidHaptics()
     LiquidActionButton(
         label = label,
-        onClick = { onCheckedChange(!checked) },
+        onClick = {
+            haptics(LiquidHaptic.SelectionTick)
+            onCheckedChange(!checked)
+        },
         tint = tint,
         modifier = modifier.semantics { this.selected = checked },
         style = if (checked) LiquidActionStyle.Filled else LiquidActionStyle.Tinted,
@@ -333,7 +362,7 @@ fun LiquidUnavailableView(title: String, symbol: LiquidSymbol, modifier: Modifie
 fun LiquidSidebarRow(title: String, symbol: LiquidSymbol, tint: Color, selected: Boolean, onClick: () -> Unit,
     modifier: Modifier = Modifier, colors: LiquidListColors = liquidListColors()) {
     val interaction = remember { MutableInteractionSource() }
-    val pressed by interaction.collectIsPressedAsState()
+    val pressed by rememberSinglePressHighlight(interaction)
     val controls = LocalLiquidGlassTokens.current.controls
     val fill by animateColorAsState(if (selected || pressed) colors.selected else Color.Transparent, tween(controls.listSelectMillis), label = "Sidebar selection")
     Row(modifier.fillMaxWidth().clip(LiquidCapsule).background(fill)
@@ -359,9 +388,10 @@ fun LiquidSidebarSectionHeader(title: String, expanded: Boolean, onToggle: () ->
     modifier: Modifier = Modifier, colors: LiquidListColors = liquidListColors()) {
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
+    val headerAlpha by animateFloatAsState(if (pressed) .55f else 1f, tween(90), label = "Sidebar header alpha")
     Row(modifier.fillMaxWidth().clip(LiquidCapsule)
         .clickable(interactionSource = interaction, indication = null, role = Role.Button, onClickLabel = toggleLabel, onClick = onToggle)
-        .graphicsLayer { alpha = if (pressed) .55f else 1f }
+        .graphicsLayer { alpha = headerAlpha }
         .heightIn(min = 44.dp).padding(horizontal = 16.dp, vertical = 6.dp).semantics { heading() },
         verticalAlignment = Alignment.CenterVertically) {
         BasicText(title, Modifier.weight(1f), style = TextStyle(colors.secondary, 14.sp, FontWeight.SemiBold))

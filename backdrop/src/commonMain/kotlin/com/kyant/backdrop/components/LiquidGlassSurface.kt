@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -79,43 +80,46 @@ fun LiquidGlassSurface(
     val motionMod = if (highlight != null) Modifier.graphicsLayer { highlight.motion.apply(this) } else Modifier
     val hasTint = tint.isSpecified && tint.alpha > 0f
     val chromaticTint = hasTint && (maxOf(tint.red, tint.green, tint.blue) - minOf(tint.red, tint.green, tint.blue)) > 0.05f
-    Box(
-        modifier
-            .then(interactionMod)
-            .then(motionMod)
-            .drawBackdrop(
-                backdrop = backdrop,
-                shape = { shape },
-                effects = {
-                    vibrancy()
-                    blur(if (regular) (appearance.controlBlurRadius * 1.6f).toPx() else 1.8.dp.toPx())
-                    val minDimPx = minOf(size.width, size.height)
-                    val refractH = minOf(10.dp.toPx(), minDimPx * 0.22f).coerceAtLeast(2f)
-                    val refractA = minOf(18.dp.toPx(), minDimPx * 0.34f).coerceAtLeast(4f)
-                    lens(refractH, refractA, depthEffect = false, chromaticAberration = true)
-                    liquidGlassTone(appearance, if (regular) LiquidGlassRole.SurfaceRegular else LiquidGlassRole.SurfaceClear)
-                },
-                highlight = { rim },
-                shadow = if (interactive) { { LiquidSurfaceShadow } } else null,
-                onDrawSurface = {
-                    if (!hasShader) drawRect(backing)
-                    if (hasTint) {
-                        if (chromaticTint && tint.alpha >= 0.35f) {
-                            val tintAlpha = if (regular) {
-                                if (appearance.dark) .36f else .28f
+    val contentColor = if (hasTint && tint.alpha >= 0.35f) liquidContentColorFor(tint) else appearance.contentColor
+    CompositionLocalProvider(LocalLiquidContentColor provides contentColor) {
+        Box(
+            modifier
+                .then(interactionMod)
+                .then(motionMod)
+                .drawBackdrop(
+                    backdrop = backdrop,
+                    shape = { shape },
+                    effects = {
+                        vibrancy()
+                        blur(if (regular) (appearance.controlBlurRadius * 1.6f).toPx() else 1.8.dp.toPx())
+                        val minDimPx = minOf(size.width, size.height)
+                        val refractH = minOf(10.dp.toPx(), minDimPx * 0.22f).coerceAtLeast(2f)
+                        val refractA = minOf(18.dp.toPx(), minDimPx * 0.34f).coerceAtLeast(4f)
+                        lens(refractH, refractA, depthEffect = false, chromaticAberration = true)
+                        liquidGlassTone(appearance, if (regular) LiquidGlassRole.SurfaceRegular else LiquidGlassRole.SurfaceClear)
+                    },
+                    highlight = { rim },
+                    shadow = if (interactive) { { LiquidSurfaceShadow } } else null,
+                    onDrawSurface = {
+                        if (!hasShader) drawRect(backing)
+                        if (hasTint) {
+                            if (chromaticTint && tint.alpha >= 0.35f) {
+                                val tintAlpha = if (regular) {
+                                    if (appearance.dark) .36f else .28f
+                                } else {
+                                    if (appearance.dark) .22f else .18f
+                                }
+                                drawRect(tint.copy(alpha = 1f), blendMode = BlendMode.Hue)
+                                drawRect(tint.copy(alpha = (tint.alpha * tintAlpha).coerceIn(0f, 1f)))
                             } else {
-                                if (appearance.dark) .22f else .18f
+                                drawRect(tint)
                             }
-                            drawRect(tint.copy(alpha = 1f), blendMode = BlendMode.Hue)
-                            drawRect(tint.copy(alpha = (tint.alpha * tintAlpha).coerceIn(0f, 1f)))
-                        } else {
-                            drawRect(tint)
                         }
-                    }
-                    highlight?.drawLight(this, brightenBackdrop = !appearance.dark)
-                },
-            ),
-        propagateMinConstraints = true,
-        content = content,
-    )
+                        highlight?.drawLight(this, brightenBackdrop = !appearance.dark)
+                    },
+                ),
+            propagateMinConstraints = true,
+            content = content,
+        )
+    }
 }

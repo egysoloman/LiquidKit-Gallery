@@ -121,21 +121,23 @@ half4 main(float2 coord) {
         dispFactor = dispersion * x * x * 0.18;
     }
 
-    half3 glassRgb;
+    half4 sampleGlass;
     if (dispFactor > 0.002) {
-        half r = content.eval(coord + refractPx * (1.0 - dispFactor)).r;
-        half g = content.eval(coord + refractPx).g;
-        half b = content.eval(coord + refractPx * (1.0 + dispFactor)).b;
-        glassRgb = half3(r, g, b);
+        half4 sR = content.eval(coord + refractPx * (1.0 - dispFactor));
+        half4 sG = content.eval(coord + refractPx);
+        half4 sB = content.eval(coord + refractPx * (1.0 + dispFactor));
+        sampleGlass = half4(sR.r, sG.g, sB.b, sG.a);
     } else {
-        glassRgb = content.eval(coord + refractPx).rgb;
+        sampleGlass = content.eval(coord + refractPx);
     }
+    half sampleA = clamp(sampleGlass.a, half(0.0), half(1.0));
+    half3 glassRgb = sampleA > half(0.001) ? clamp(sampleGlass.rgb / sampleA, half3(0.0), half3(1.0)) : half3(0.0);
 
     // Both surface weights come from the same shape transition using luminance-adaptive
     // iOS 27.1 toning between Control (0) and Menu (1), then any explicit caller tint.
     half3 collapsedTone = applyLiquidGlassTone(glassRgb, 1.0 - pale, glassOpacity, 0.0);
     half3 expandedTone = applyLiquidGlassTone(glassRgb, 1.0 - pale, glassOpacity, 1.0);
-    glassRgb = mix(collapsedTone, expandedTone, half(clamp(materialProgress, 0.0, 1.0)));
+    glassRgb = mix(collapsedTone, expandedTone, half(clamp(materialProgress, 0.0, 1.0))) * sampleA;
     half customA = clamp(collapsedSurface.a + expandedSurface.a, half(0.0), half(1.0));
     if (customA > half(0.001)) {
         glassRgb = glassRgb * (1.0 - customA) + collapsedSurface.rgb * collapsedSurface.a
@@ -195,12 +197,8 @@ fun BackdropEffectScope.liquidMorphLens(
     config: LiquidMorphConfig,
     pressPosition: Offset = Offset(frame.pressGlowX, frame.pressGlowY),
     pressStrength: Float = frame.pressGlow,
+    appearance: LiquidGlassAppearance = LiquidGlassAppearance(dark = false, opacity = 0.5f),
 ) {
-    liquidMorphLens(frame, config, pressPosition, pressStrength, LiquidGlassAppearance(dark = false, opacity = 0.5f))
-}
-
-internal fun BackdropEffectScope.liquidMorphLens(frame: LiquidMorphFrame, config: LiquidMorphConfig,
-    pressPosition: Offset, pressStrength: Float, appearance: LiquidGlassAppearance) {
     val bevelPx = config.bevelWidthDp * density
     val refractAmountPx = config.refractionAmountDp * density
     runtimeShaderEffect(

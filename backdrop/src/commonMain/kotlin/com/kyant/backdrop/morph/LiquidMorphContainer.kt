@@ -217,7 +217,10 @@ fun LiquidMorphContainer(
             )
         val restored by rememberUpdatedState(onSourceRestored)
         LaunchedEffect(expanded, sourceRestored, returnOwner, borderless) {
-            if (expanded) returnOpacity.snapTo(1f)
+            if (expanded) {
+                returnOwner?.restoringSource = false
+                returnOpacity.snapTo(1f)
+            }
             if (!sourceRestored || restored == null) return@LaunchedEffect
             if (returnOwner != null && !borderless) {
                 returnOwner.restoringSource = true

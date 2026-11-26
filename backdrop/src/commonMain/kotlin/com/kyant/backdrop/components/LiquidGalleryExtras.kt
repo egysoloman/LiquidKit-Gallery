@@ -1,27 +1,39 @@
 package com.kyant.backdrop.components
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.verticalScroll
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -47,6 +59,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import com.kyant.backdrop.Backdrop
 import com.kyant.backdrop.RuntimeShader
+import com.kyant.backdrop.SharedRenderEffectShaderCache
 import com.kyant.backdrop.asComposeShader
 import com.kyant.backdrop.isRuntimeShaderSupported
 import kotlin.math.PI
@@ -86,7 +99,8 @@ fun LiquidBadge(
 
 /** SwiftUI `.redacted(reason: .placeholder)` animated skeleton shimmer overlay. */
 fun Modifier.liquidRedacted(active: Boolean, cornerRadius: Dp = 8.dp): Modifier = composed {
-    if (!active) return@composed this
+    val overlayAlpha by animateFloatAsState(if (active) 1f else 0f, tween(180), label = "LiquidRedacted alpha")
+    if (!active && overlayAlpha <= 0.003f) return@composed this
     val dark = liquidGlassAppearance().dark
     val transition = rememberInfiniteTransition(label = "LiquidRedacted")
     val shimmerState = transition.animateFloat(
@@ -99,14 +113,17 @@ fun Modifier.liquidRedacted(active: Boolean, cornerRadius: Dp = 8.dp): Modifier 
     val highlight = if (dark) Color(0xff3e3e42) else Color(0xfff4f4f8)
     val shimmerColors = remember(base, highlight) { listOf(base, highlight, base) }
     this.drawWithContent {
-        val shimmer = shimmerState.value
-        val radius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx())
-        val brush = Brush.linearGradient(
-            colors = shimmerColors,
-            start = Offset(size.width * (shimmer - 0.35f), 0f),
-            end = Offset(size.width * (shimmer + 0.35f), size.height),
-        )
-        drawRoundRect(brush = brush, cornerRadius = radius)
+        drawContent()
+        if (overlayAlpha > 0.003f) {
+            val shimmer = shimmerState.value
+            val radius = CornerRadius(cornerRadius.toPx(), cornerRadius.toPx())
+            val brush = Brush.linearGradient(
+                colors = shimmerColors,
+                start = Offset(size.width * (shimmer - 0.35f), 0f),
+                end = Offset(size.width * (shimmer + 0.35f), size.height),
+            )
+            drawRoundRect(brush = brush, cornerRadius = radius, alpha = overlayAlpha)
+        }
     }
 }
 
@@ -145,7 +162,8 @@ fun <T> LiquidReorderableGrid(
     val currentItems by rememberUpdatedState(items)
     val commitReorder by rememberUpdatedState(onReorder)
     val haptics = rememberLiquidHaptics()
-    val settleSpring = remember { GlassSpring.snappy(0.28f).spec }
+    val settleOffsetSpec = remember { GlassSpring.snappy(0.28f).offsetSpec }
+    val scope = rememberCoroutineScope()
 
     BoxWithConstraints(modifier.fillMaxWidth()) {
         val spacingPx = with(androidx.compose.ui.platform.LocalDensity.current) { spacing.toPx() }
@@ -165,8 +183,15 @@ fun <T> LiquidReorderableGrid(
 
                 key(itemKey) {
                     val scaleState = animateFloatAsState(if (isDragging) 1.07f else 1f, GlassSpring.snappy(0.24f).spec, label = "Tile scale")
-                    val animX = animateFloatAsState(baseX, settleSpring, label = "Tile X")
-                    val animY = animateFloatAsState(baseY, settleSpring, label = "Tile Y")
+                    val posAnim = remember { Animatable(Offset(baseX, baseY), Offset.VectorConverter) }
+                    LaunchedEffect(baseX, baseY, isDragging) {
+                        val target = Offset(baseX, baseY)
+                        if (isDragging) {
+                            posAnim.snapTo(target + dragOffset)
+                        } else if ((posAnim.targetValue - target).getDistance() > 0.5f || posAnim.isRunning.not()) {
+                            posAnim.animateTo(target, settleOffsetSpec)
+                        }
+                    }
                     Box(
                         Modifier
                             .zIndex(if (isDragging) 10f else 0f)
@@ -174,7 +199,8 @@ fun <T> LiquidReorderableGrid(
                                 if (isDragging) {
                                     IntOffset((baseX + dragOffset.x).roundToInt(), (baseY + dragOffset.y).roundToInt())
                                 } else {
-                                    IntOffset(animX.value.roundToInt(), animY.value.roundToInt())
+                                    val pos = posAnim.value
+                                    IntOffset(pos.x.roundToInt(), pos.y.roundToInt())
                                 }
                             }
                             .size(tileWidthDp, tileHeight)
@@ -182,22 +208,46 @@ fun <T> LiquidReorderableGrid(
                                 val s = scaleState.value
                                 scaleX = s
                                 scaleY = s
-                                shadowElevation = if (isDragging) 16f else 0f
+                                shadowElevation = ((s - 1f) / 0.07f).coerceIn(0f, 1f) * 16f
                             }
                             .pointerInput(itemKey, cols, tileWidthPx, tileHeightPx, spacingPx) {
                                 detectDragGesturesAfterLongPress(
                                     onDragStart = {
+                                        val startIdx = currentItems.indexOfFirst { key(it) == itemKey }.coerceAtLeast(0)
+                                        val startBase = Offset(
+                                            (startIdx % cols) * (tileWidthPx + spacingPx),
+                                            (startIdx / cols) * (tileHeightPx + spacingPx),
+                                        )
                                         draggingKey = itemKey
                                         dragOffset = Offset.Zero
+                                        scope.launch { posAnim.snapTo(startBase) }
                                         haptics(LiquidHaptic.LongPressLift)
                                     },
                                     onDragEnd = {
+                                        val releasePos = posAnim.value
                                         draggingKey = null
                                         dragOffset = Offset.Zero
+                                        val curList = currentItems
+                                        val finalIdx = curList.indexOfFirst { key(it) == itemKey }.coerceAtLeast(0)
+                                        val endTarget = Offset(
+                                            (finalIdx % cols) * (tileWidthPx + spacingPx),
+                                            (finalIdx / cols) * (tileHeightPx + spacingPx),
+                                        )
+                                        scope.launch {
+                                            posAnim.snapTo(releasePos)
+                                            posAnim.animateTo(endTarget, settleOffsetSpec)
+                                        }
                                     },
                                     onDragCancel = {
                                         draggingKey = null
                                         dragOffset = Offset.Zero
+                                        val curList = currentItems
+                                        val finalIdx = curList.indexOfFirst { key(it) == itemKey }.coerceAtLeast(0)
+                                        val endTarget = Offset(
+                                            (finalIdx % cols) * (tileWidthPx + spacingPx),
+                                            (finalIdx / cols) * (tileHeightPx + spacingPx),
+                                        )
+                                        scope.launch { posAnim.animateTo(endTarget, settleOffsetSpec) }
                                     },
                                     onDrag = { change, amount ->
                                         change.consume()
@@ -207,8 +257,9 @@ fun <T> LiquidReorderableGrid(
                                         if (fromIdx >= 0) {
                                             val curCol = fromIdx % cols
                                             val curRow = fromIdx / cols
-                                            val centerX = curCol * (tileWidthPx + spacingPx) + tileWidthPx * 0.5f + dragOffset.x
-                                            val centerY = curRow * (tileHeightPx + spacingPx) + tileHeightPx * 0.5f + dragOffset.y
+                                            val curBase = Offset(curCol * (tileWidthPx + spacingPx), curRow * (tileHeightPx + spacingPx))
+                                            val centerX = curBase.x + tileWidthPx * 0.5f + dragOffset.x
+                                            val centerY = curBase.y + tileHeightPx * 0.5f + dragOffset.y
                                             val targetCol = (centerX / (tileWidthPx + spacingPx)).toInt().coerceIn(0, cols - 1)
                                             val targetRow = (centerY / (tileHeightPx + spacingPx)).toInt().coerceIn(0, max(0, (list.size - 1) / cols))
                                             val targetIdx = (targetRow * cols + targetCol).coerceIn(0, list.lastIndex)
@@ -219,8 +270,15 @@ fun <T> LiquidReorderableGrid(
                                                     deltaCol * (tileWidthPx + spacingPx),
                                                     deltaRow * (tileHeightPx + spacingPx),
                                                 )
+                                                val newBase = Offset(
+                                                    (targetIdx % cols) * (tileWidthPx + spacingPx),
+                                                    (targetIdx / cols) * (tileHeightPx + spacingPx),
+                                                )
+                                                scope.launch { posAnim.snapTo(newBase + dragOffset) }
                                                 haptics(LiquidHaptic.SelectionTick)
                                                 commitReorder(moveListItem(list, fromIdx, targetIdx))
+                                            } else {
+                                                scope.launch { posAnim.snapTo(curBase + dragOffset) }
                                             }
                                         }
                                     },
@@ -256,12 +314,28 @@ fun LiquidInspector(
     inspectorContent: @Composable ColumnScope.() -> Unit,
     content: @Composable BoxScope.() -> Unit,
 ) {
+    val mainBody = remember(content) { movableContentOf { Box(Modifier.fillMaxSize(), content = content) } }
+    val inspectorBody = remember(inspectorContent) { movableContentOf<ColumnScope> { scope -> scope.inspectorContent() } }
+    LiquidPredictiveBackHandler(enabled = isPresented) { events ->
+        try {
+            events.collect {}
+            onDismiss()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        }
+    }
     BoxWithConstraints(modifier.fillMaxSize()) {
         val wide = maxWidth >= 600.dp
         if (wide) {
             Row(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f).fillMaxHeight(), content = content)
-                AnimatedVisibility(isPresented) {
+                Box(Modifier.weight(1f).fillMaxHeight()) { mainBody() }
+                AnimatedVisibility(
+                    visible = isPresented,
+                    enter = slideInHorizontally(GlassSpring.snappy(0.30f).specWithThreshold(IntOffset(1, 1))) { it } +
+                        expandHorizontally(expandFrom = Alignment.End) + fadeIn(tween(180)),
+                    exit = slideOutHorizontally(GlassSpring.snappy(0.28f).specWithThreshold(IntOffset(1, 1))) { it } +
+                        shrinkHorizontally(shrinkTowards = Alignment.End) + fadeOut(tween(150)),
+                ) {
                     Row(Modifier.width(inspectorWidth).fillMaxHeight()) {
                         Spacer(Modifier.width(.6.dp).fillMaxHeight().background(colors.separator))
                         Column(
@@ -271,6 +345,7 @@ fun LiquidInspector(
                                         WindowInsetsSides.Top + WindowInsetsSides.Bottom + WindowInsetsSides.End,
                                     ),
                                 )
+                                .verticalScroll(rememberScrollState())
                                 .padding(16.dp),
                             verticalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
@@ -278,13 +353,13 @@ fun LiquidInspector(
                                 BasicText(title, Modifier.weight(1f), style = TextStyle(colors.ink, 17.sp, FontWeight.SemiBold))
                                 LiquidActionButton("完成", onDismiss, Color(0xff007aff), style = LiquidActionStyle.Borderless, controlSize = LiquidControlSize.Small)
                             }
-                            inspectorContent()
+                            inspectorBody(this)
                         }
                     }
                 }
             }
         } else {
-            Box(Modifier.fillMaxSize(), content = content)
+            mainBody()
             if (isPresented) {
                 LiquidSheet(
                     onDismissRequest = onDismiss,
@@ -292,7 +367,7 @@ fun LiquidInspector(
                     title = title,
                     detents = listOf(LiquidSheetDetent.Medium, LiquidSheetDetent.Large),
                     colors = colors,
-                    content = inspectorContent,
+                    content = { inspectorBody(this) },
                 )
             }
         }
@@ -328,7 +403,7 @@ fun LiquidTabViewBottomAccessory(
 // 4. MeshGradient, FlowLayout, OutlineGroup, Sortable Table, TipCard
 // ──────────────────────────────────────────────────────────────────────────────
 
-private const val MeshGradient3x3Agsl = """
+internal const val MeshGradient3x3Agsl = """
 uniform float2 resolution;
 uniform float4 c0, c1, c2;
 uniform float4 c3, c4, c5;
@@ -352,11 +427,10 @@ half4 main(float2 fragCoord) {
     half4 r0 = sampleRow(c0, c1, c2, uv.x);
     half4 r1 = sampleRow(c3, c4, c5, uv.x);
     half4 r2 = sampleRow(c6, c7, c8, uv.x);
-    if (uv.y < 0.5) {
-        return mix(r0, r1, half(smooth01(uv.y * 2.0)));
-    } else {
-        return mix(r1, r2, half(smooth01((uv.y - 0.5) * 2.0)));
-    }
+    half4 res = (uv.y < 0.5)
+        ? mix(r0, r1, half(smooth01(uv.y * 2.0)))
+        : mix(r1, r2, half(smooth01((uv.y - 0.5) * 2.0)));
+    return half4(res.rgb * res.a, res.a);
 }
 """
 
@@ -378,8 +452,9 @@ fun LiquidMeshGradient(
     if (colors.size < cols * rows) return
 
     val supportsAgsl = remember { isRuntimeShaderSupported() }
-    val shader = remember(supportsAgsl) { if (supportsAgsl) RuntimeShader(MeshGradient3x3Agsl) else null }
-    val shaderBrush = remember(shader) { shader?.let { ShaderBrush(it.asComposeShader()) } }
+    val shader = remember(supportsAgsl) {
+        if (supportsAgsl) SharedRenderEffectShaderCache.obtainRuntimeShader("MeshGradient3x3", MeshGradient3x3Agsl) else null
+    }
 
     // Map any 2x2 or 3x3 grid cleanly into the 3x3 AGSL uniforms so both 2x2 and 3x3 run on GPU.
     val grid3x3 = remember(cols, rows, colors) {
@@ -403,13 +478,13 @@ fun LiquidMeshGradient(
     }
 
     Canvas(modifier) {
-        if (shader != null && shaderBrush != null && grid3x3 != null) {
+        if (shader != null && grid3x3 != null) {
             shader.setFloatUniform("resolution", size.width, size.height)
             for (i in 0 until 9) {
                 val c = grid3x3[i]
                 shader.setFloatUniform("c$i", c.red, c.green, c.blue, c.alpha)
             }
-            drawRect(brush = shaderBrush)
+            drawRect(brush = ShaderBrush(shader.asComposeShader()))
             return@Canvas
         }
         val stepsX = subdivisions.coerceAtLeast(16)
@@ -718,62 +793,92 @@ fun LiquidBarChart(
     val maxVal = remember(points) { (points.maxOfOrNull { it.value } ?: 1f).coerceAtLeast(1f) }
     if (categories.isEmpty()) return
 
-    Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Canvas(Modifier.fillMaxWidth().height(190.dp)) {
-            val gridColor = colors.separator.copy(alpha = .45f)
-            if (!horizontal) {
-                for (i in 0..4) {
-                    val y = size.height * i / 4f
-                    drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-                }
-                val groupW = size.width / categories.size
-                val barGap = 4.dp.toPx()
-                val innerPad = groupW * 0.16f
-                val availW = (groupW - innerPad * 2f).coerceAtLeast(8f)
-                val barW = ((availW - barGap * (seriesList.size - 1)) / seriesList.size.coerceAtLeast(1)).coerceAtLeast(4f)
-                val cr = CornerRadius(5.dp.toPx(), 5.dp.toPx())
-                categories.forEachIndexed { cIdx, cat ->
-                    seriesList.forEachIndexed { sIdx, ser ->
-                        val p = points.firstOrNull { it.label == cat && it.series == ser } ?: return@forEachIndexed
-                        val h = (p.value / maxVal).coerceIn(0f, 1f) * (size.height - 6.dp.toPx())
-                        val x = cIdx * groupW + innerPad + sIdx * (barW + barGap)
-                        drawRoundRect(
-                            color = p.color,
-                            topLeft = Offset(x, size.height - h),
-                            size = Size(barW, h),
-                            cornerRadius = cr,
-                        )
+    val animatedFracs = points.map { p ->
+        key(p.label, p.series) {
+            animateFloatAsState(
+                targetValue = (p.value / maxVal).coerceIn(0f, 1f),
+                animationSpec = tween(320, easing = FastOutSlowInEasing),
+                label = "Bar frac",
+            )
+        }
+    }
+    fun animFrac(label: String, series: String): Float {
+        val idx = points.indexOfFirst { it.label == label && it.series == series }
+        return if (idx >= 0) animatedFracs[idx].value else 0f
+    }
+
+    AnimatedContent(targetState = horizontal, label = "Bar orientation", modifier = modifier.fillMaxWidth()) { isHorizontal ->
+        if (!isHorizontal) {
+            Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Canvas(Modifier.fillMaxWidth().height(190.dp)) {
+                    val gridColor = colors.separator.copy(alpha = .45f)
+                    for (i in 0..4) {
+                        val y = size.height * i / 4f
+                        drawLine(gridColor, Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                    }
+                    val groupW = size.width / categories.size
+                    val barGap = 4.dp.toPx()
+                    val innerPad = groupW * 0.16f
+                    val availW = (groupW - innerPad * 2f).coerceAtLeast(8f)
+                    val barW = ((availW - barGap * (seriesList.size - 1)) / seriesList.size.coerceAtLeast(1)).coerceAtLeast(4f)
+                    val cr = CornerRadius(5.dp.toPx(), 5.dp.toPx())
+                    categories.forEachIndexed { cIdx, cat ->
+                        seriesList.forEachIndexed { sIdx, ser ->
+                            val p = points.firstOrNull { it.label == cat && it.series == ser } ?: return@forEachIndexed
+                            val h = animFrac(cat, ser) * (size.height - 6.dp.toPx())
+                            val x = cIdx * groupW + innerPad + sIdx * (barW + barGap)
+                            drawRoundRect(
+                                color = p.color,
+                                topLeft = Offset(x, size.height - h),
+                                size = Size(barW, h),
+                                cornerRadius = cr,
+                            )
+                        }
                     }
                 }
-            } else {
-                for (i in 0..4) {
-                    val x = size.width * i / 4f
-                    drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
-                }
-                val groupH = size.height / categories.size
-                val barGap = 3.dp.toPx()
-                val innerPad = groupH * 0.14f
-                val availH = (groupH - innerPad * 2f).coerceAtLeast(8f)
-                val barH = ((availH - barGap * (seriesList.size - 1)) / seriesList.size.coerceAtLeast(1)).coerceAtLeast(4f)
-                val cr = CornerRadius(4.dp.toPx(), 4.dp.toPx())
-                categories.forEachIndexed { cIdx, cat ->
-                    seriesList.forEachIndexed { sIdx, ser ->
-                        val p = points.firstOrNull { it.label == cat && it.series == ser } ?: return@forEachIndexed
-                        val w = (p.value / maxVal).coerceIn(0f, 1f) * (size.width - 6.dp.toPx())
-                        val y = cIdx * groupH + innerPad + sIdx * (barH + barGap)
-                        drawRoundRect(
-                            color = p.color,
-                            topLeft = Offset(0f, y),
-                            size = Size(w, barH),
-                            cornerRadius = cr,
-                        )
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
+                    categories.forEach { cat ->
+                        BasicText(cat, style = TextStyle(colors.secondary, 11.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
-        }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceAround) {
-            categories.forEach { cat ->
-                BasicText(cat, style = TextStyle(colors.secondary, 11.sp))
+        } else {
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(
+                    Modifier.height(190.dp),
+                    verticalArrangement = Arrangement.SpaceAround,
+                    horizontalAlignment = Alignment.End,
+                ) {
+                    categories.forEach { cat ->
+                        BasicText(cat, style = TextStyle(colors.secondary, 11.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                Canvas(Modifier.weight(1f).height(190.dp)) {
+                    val gridColor = colors.separator.copy(alpha = .45f)
+                    for (i in 0..4) {
+                        val x = size.width * i / 4f
+                        drawLine(gridColor, Offset(x, 0f), Offset(x, size.height), strokeWidth = 1f)
+                    }
+                    val groupH = size.height / categories.size
+                    val barGap = 3.dp.toPx()
+                    val innerPad = groupH * 0.14f
+                    val availH = (groupH - innerPad * 2f).coerceAtLeast(8f)
+                    val barH = ((availH - barGap * (seriesList.size - 1)) / seriesList.size.coerceAtLeast(1)).coerceAtLeast(4f)
+                    val cr = CornerRadius(4.dp.toPx(), 4.dp.toPx())
+                    categories.forEachIndexed { cIdx, cat ->
+                        seriesList.forEachIndexed { sIdx, ser ->
+                            val p = points.firstOrNull { it.label == cat && it.series == ser } ?: return@forEachIndexed
+                            val w = animFrac(cat, ser) * (size.width - 6.dp.toPx())
+                            val y = cIdx * groupH + innerPad + sIdx * (barH + barGap)
+                            drawRoundRect(
+                                color = p.color,
+                                topLeft = Offset(0f, y),
+                                size = Size(w, barH),
+                                cornerRadius = cr,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -807,6 +912,12 @@ fun LiquidLineAreaChart(
     val areaBrush = remember(lineColor) {
         Brush.verticalGradient(listOf(lineColor.copy(alpha = .35f), Color.Transparent))
     }
+    val currentSelected by rememberUpdatedState(selectedIndex)
+    val scrubFrac by animateFloatAsState(
+        targetValue = if (selectedIndex != null && selectedIndex in values.indices) selectedIndex.toFloat() / (values.size - 1) else -1f,
+        animationSpec = tween(160, easing = FastOutSlowInEasing),
+        label = "Line scrubber",
+    )
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Canvas(
             Modifier
@@ -814,10 +925,15 @@ fun LiquidLineAreaChart(
                 .height(chartHeight)
                 .pointerInput(values.size, onSelectIndex) {
                     if (onSelectIndex == null) return@pointerInput
-                    detectHorizontalDragGestures(
-                        onDragEnd = { onSelectIndex(null) },
-                        onDragCancel = { onSelectIndex(null) },
-                    ) { change, _ ->
+                    detectTapGestures { offset ->
+                        val frac = (offset.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
+                        val idx = (frac * (values.size - 1)).roundToInt().coerceIn(0, values.lastIndex)
+                        onSelectIndex(if (currentSelected == idx) null else idx)
+                    }
+                }
+                .pointerInput(values.size, onSelectIndex) {
+                    if (onSelectIndex == null) return@pointerInput
+                    detectHorizontalDragGestures { change, _ ->
                         val frac = (change.position.x / size.width.coerceAtLeast(1)).coerceIn(0f, 1f)
                         onSelectIndex((frac * (values.size - 1)).roundToInt().coerceIn(0, values.lastIndex))
                     }
@@ -869,7 +985,7 @@ fun LiquidLineAreaChart(
                 )
             }
             if (selectedIndex != null && selectedIndex in pts.indices) {
-                val sx = pts[selectedIndex].x
+                val sx = padX + spanX * scrubFrac.coerceIn(0f, 1f)
                 drawLine(colors.secondary.copy(alpha = .55f), Offset(sx, 0f), Offset(sx, size.height), strokeWidth = 1.2.dp.toPx())
             }
         }
@@ -891,13 +1007,19 @@ fun LiquidPieDonutChart(
     centerContent: @Composable BoxScope.() -> Unit = {},
 ) {
     val total = slices.sumOf { it.value.toDouble() }.toFloat().coerceAtLeast(1e-4f)
+    val progress = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        progress.animateTo(1f, tween(520, easing = FastOutSlowInEasing))
+    }
+    val ratioAnim by animateFloatAsState(innerRadiusRatio.coerceIn(0f, 0.82f), tween(260, easing = FastOutSlowInEasing), label = "Pie ratio")
     Box(modifier.size(200.dp), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val outerR = min(size.width, size.height) * 0.46f
-            val ratio = innerRadiusRatio.coerceIn(0f, 0.82f)
+            val ratio = ratioAnim
+            val sweepFactor = progress.value.coerceIn(0.01f, 1f)
             var startDeg = -90f
             for (slice in slices) {
-                val sweep = (slice.value / total) * 360f
+                val sweep = (slice.value / total) * 360f * sweepFactor
                 val gap = min(angularInsetDegrees, sweep * 0.4f)
                 if (ratio <= 0.02f) {
                     drawArc(
@@ -924,8 +1046,12 @@ fun LiquidPieDonutChart(
                 startDeg += sweep
             }
         }
-        if (innerRadiusRatio >= 0.35f) {
-            centerContent()
+        AnimatedVisibility(
+            visible = innerRadiusRatio >= 0.35f,
+            enter = fadeIn(tween(180)),
+            exit = fadeOut(tween(150)),
+        ) {
+            Box(contentAlignment = Alignment.Center, content = centerContent)
         }
     }
 }

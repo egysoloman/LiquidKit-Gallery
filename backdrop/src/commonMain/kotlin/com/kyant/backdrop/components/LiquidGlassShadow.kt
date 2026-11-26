@@ -13,7 +13,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import com.kyant.backdrop.RuntimeShader
-import com.kyant.backdrop.SharedRenderEffectShaderCache
 import com.kyant.backdrop.asComposeShader
 import com.kyant.backdrop.internal.ShapeProvider
 import com.kyant.backdrop.isRuntimeShaderSupported
@@ -29,14 +28,14 @@ internal fun Modifier.liquidGlassShadow(
     shape: Shape, elevation: Float, radius: Dp = 0.dp, frame: LiquidMorphFrame? = null,
 ): Modifier {
     val p = elevation.coerceIn(0f, 1f)
-    val alpha = .016f + (.12f - .016f) * p
+    val dark = liquidGlassAppearance().dark
+    val alpha = if (dark) .06f + (.32f - .06f) * p else .016f + (.12f - .016f) * p
     val offset = (4f + 3.75f * p).dp
     if (!isRuntimeShaderSupported()) {
         val shadow = Shadow(radius = (9f + 20f * p).dp, offset = DpOffset(0.dp, offset), color = Color.Black.copy(alpha = alpha))
         return then(ShadowElement(ShapeProvider { shape }) { shadow })
     }
-    val shader = remember { SharedRenderEffectShaderCache.obtainRuntimeShader("ShadowShader", ShadowShader) }
-    val brush = remember(shader) { ShaderBrush(shader.asComposeShader()) }
+    val shader = remember { RuntimeShader(ShadowShader) }
     return drawWithContent {
         fun lobe(name: String, box: SdfBoxPrimitive?) {
             if (box != null && box.active) {
@@ -52,14 +51,15 @@ internal fun Modifier.liquidGlassShadow(
         }
         shader.setFloatUniform("radii", frame?.pill?.r ?: radius.toPx(), frame?.body?.r ?: 0f)
         val body = frame?.body
-        shader.setFloatUniform("bodyCrownBias", body?.crownBias ?: 0f)
         shader.setFloatUniform("bodyContour", body?.radiusY ?: 0f, body?.tipX ?: 0f, if (body?.tipAtBottom == true) 1f else -1f, body?.farRadiusY ?: 0f)
+        shader.setFloatUniform("bodyCrownBias", body?.crownBias ?: 0f)
         shader.setFloatUniform("join", frame?.smoothK ?: 0f)
         val sigma = (5f + 12f * p).dp.toPx()
         val shift = offset.toPx()
         shader.setFloatUniform("shadow", sigma, shift, alpha)
         val margin = 3.5f * sigma + shift
-        drawRect(brush, Offset(-margin, -margin), Size(size.width + 2f * margin, size.height + 2f * margin))
+        // Build ShaderBrush after updating uniforms so Skiko snapshots current uniform values instead of all zeros.
+        drawRect(ShaderBrush(shader.asComposeShader()), Offset(-margin, -margin), Size(size.width + 2f * margin, size.height + 2f * margin))
         drawContent()
     }
 }

@@ -20,10 +20,10 @@ import kotlin.coroutines.coroutineContext
 @Immutable
 class LiquidMenuMetrics(viewportWidth: Dp, fontScale: Float = 1f) {
     // Only limit a panel which physically cannot fit. A phone or a split pane uses the same control sizes.
-    val scale = ((viewportWidth - 20.dp) / 250.dp).coerceIn(.1f, 1f)
+    val scale = ((viewportWidth - 20.dp) / 216.dp).coerceIn(.1f, 1f)
     private val textHeight = fontScale.coerceAtLeast(1f)
-    val width = 250.dp * scale
-    val inset = 10.dp * scale
+    val width = 216.dp * scale
+    val inset = 9.dp * scale
     val row = 42.dp * scale * textHeight
     val subtitleRow = 58.dp * scale * textHeight
     val actions = 52.dp * scale * textHeight

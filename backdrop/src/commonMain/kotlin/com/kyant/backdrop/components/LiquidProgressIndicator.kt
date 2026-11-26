@@ -70,13 +70,13 @@ fun LiquidActivityIndicator(
         animationSpec = infiniteRepeatable(tween(840, easing = LinearEasing), RepeatMode.Restart),
         label = "ActivityIndicatorPhase",
     )
-    val activeStep = phase.toInt() % 12
     Column(
         modifier.semantics(mergeDescendants = true) {},
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Canvas(Modifier.size(size)) {
+            val activeStep = phase.toInt() % 12
             val radius = this.size.minDimension / 2f
             val inner = radius * .42f
             val outer = radius * .92f
@@ -88,7 +88,7 @@ fun LiquidActivityIndicator(
                 val dx = cos(angle)
                 val dy = sin(angle)
                 drawLine(
-                    color = color.copy(alpha = alpha),
+                    color = color.copy(alpha = color.alpha * alpha),
                     start = Offset(center.x + dx * inner, center.y + dy * inner),
                     end = Offset(center.x + dx * outer, center.y + dy * outer),
                     strokeWidth = stroke,

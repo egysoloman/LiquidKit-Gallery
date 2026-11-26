@@ -4,6 +4,7 @@ import android.content.Intent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -15,9 +16,12 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -163,20 +167,20 @@ fun LiquidGlassEffectsDemo(item: ComponentItem, onBack: () -> Unit) {
                 LiquidKitGlassEffectContainer(
                     backdrop = glass,
                     modifier = Modifier.fillMaxSize(),
-                    spacing = 14.dp,
+                    spacing = 7.dp,
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         if (expandProgress > 0.02f) {
                             val targets = listOf(
-                                LiquidKitSymbol.Rename to -22f,
-                                LiquidKitSymbol.Camera to 32f,
-                                LiquidKitSymbol.Send to 86f,
+                                LiquidKitSymbol.Rename to -34f,
+                                LiquidKitSymbol.Camera to 34f,
+                                LiquidKitSymbol.Send to 102f,
                             )
                             val reveal = ((expandProgress - 0.12f) / 0.88f).coerceIn(0f, 1f)
                             for ((sym, targetDp) in targets) {
                                 LiquidKitToolbarGroup(
                                     Modifier
-                                        .offset { IntOffset((lerp(-80f, targetDp, expandProgress).dp.toPx()).roundToInt(), 0) }
+                                        .offset { IntOffset((lerp(-102f, targetDp, expandProgress).dp.toPx()).roundToInt(), 0) }
                                         .size(44.dp),
                                     backdrop = glass,
                                 ) {
@@ -197,7 +201,7 @@ fun LiquidGlassEffectsDemo(item: ComponentItem, onBack: () -> Unit) {
                         }
                         LiquidKitToolbarGroup(
                             Modifier
-                                .offset { IntOffset((-80.dp.toPx() * expandProgress).roundToInt(), 0) }
+                                .offset { IntOffset((-102.dp.toPx() * expandProgress).roundToInt(), 0) }
                                 .size(48.dp),
                             backdrop = glass,
                         ) {
@@ -576,7 +580,7 @@ fun MenuAndLinkDemo(item: ComponentItem, onBack: () -> Unit) {
                         }
                     }
                     LiquidKitActionButton("系统分享", {
-                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "SwiftUI Gallery for Android"), "分享"))
+                        context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_TEXT, "LiquidKit Gallery for Android"), "分享"))
                     }, style = LiquidKitActionStyle.Tinted, leadingSymbol = LiquidKitSymbol.Share)
                 }
             }
@@ -834,8 +838,34 @@ fun DateAndColorPickerDemo(item: ComponentItem, onBack: () -> Unit) {
                 LiquidKitToggle({ supportsOpacity }, { supportsOpacity = it })
             }
             LiquidKitColorPicker("自定义颜色", pickedColor, { pickedColor = it }, colors = colors, supportsOpacity = supportsOpacity)
-            Box(Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(10.dp)).background(pickedColor), contentAlignment = Alignment.Center) {
-                BasicText("当前预览颜色", style = TextStyle(Color.White, 13.sp, FontWeight.SemiBold))
+            val previewTextColor = if (pickedColor.luminance() > 0.55f && pickedColor.alpha > 0.45f) {
+                Color(0xff19191d)
+            } else if (pickedColor.alpha <= 0.45f) {
+                colors.ink
+            } else {
+                Color.White
+            }
+            Box(Modifier.fillMaxWidth().height(40.dp).clip(RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
+                Canvas(Modifier.matchParentSize()) {
+                    if (pickedColor.alpha < 0.99f) {
+                        val cell = 6.dp.toPx()
+                        val light = Color(0xffffffff)
+                        val mid = Color(0xffd0d0d8)
+                        val cols = (size.width / cell).toInt() + 1
+                        val rows = (size.height / cell).toInt() + 1
+                        for (r in 0 until rows) {
+                            for (c in 0 until cols) {
+                                drawRect(
+                                    color = if ((r + c) % 2 == 0) light else mid,
+                                    topLeft = Offset(c * cell, r * cell),
+                                    size = Size(cell, cell),
+                                )
+                            }
+                        }
+                    }
+                    drawRect(pickedColor)
+                }
+                BasicText("当前预览颜色", style = TextStyle(previewTextColor, 13.sp, FontWeight.SemiBold))
             }
         }
     }

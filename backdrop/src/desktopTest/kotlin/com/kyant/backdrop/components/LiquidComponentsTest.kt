@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -25,6 +26,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.graphics.asSkiaPath
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -1134,6 +1136,130 @@ class LiquidComponentsTest {
     }
 
     @Test
+    fun landscapeTabBarAnimatesSmoothlyBetweenSingleCapsuleAndMinimizedOrbs() {
+        var barSize = IntSize.Zero
+        var isMinimized by mutableStateOf(false)
+        val scene = ImageComposeScene(width = 720, height = 100, density = Density(1f)) {
+            LiquidGlassTheme(opacity = .5f, dark = true) {
+                val bg = com.kyant.backdrop.backdrops.rememberSolidColorBackdrop(Color(0xFF0A0C10))
+                val tabs = remember {
+                    listOf(
+                        LiquidTab("lib", "组件库", LiquidSymbol.Grid),
+                        LiquidTab("new", "iOS 27", LiquidSymbol.Sparkles),
+                    )
+                }
+                Box(Modifier.fillMaxSize().background(Color(0xFF0A0C10)), contentAlignment = Alignment.Center) {
+                    LiquidTabBar(
+                        tabs = tabs,
+                        selected = "lib",
+                        onSelect = {},
+                        backdrop = bg,
+                        tint = Color(0xFF007AFF),
+                        modifier = Modifier.fillMaxWidth().onGloballyPositioned { barSize = it.size },
+                        minimized = isMinimized,
+                        onExpandFromMinimized = { isMinimized = false },
+                        searchAction = {},
+                    )
+                }
+            }
+        }
+        fun brightPixelCount(bmp: org.jetbrains.skia.Bitmap, xRange: IntRange, yRange: IntRange = 28..72): Int {
+            var count = 0
+            for (y in yRange) {
+                for (x in xRange) {
+                    val px = bmp.getColor(x, y)
+                    val maxCh = maxOf((px shr 16) and 0xFF, (px shr 8) and 0xFF, px and 0xFF)
+                    if (maxCh > 36) count++
+                }
+            }
+            return count
+        }
+        try {
+            val initImg = scene.render(1_000_000L)
+            val initBmp = org.jetbrains.skia.Bitmap.makeFromImage(initImg)
+            try {
+                assertEquals("Landscape tab bar height must stay 48dp", 48, barSize.height)
+                assertEquals("Landscape tab bar spans 720dp container", 720, barSize.width)
+                assertTrue("Expanded pill must draw tabs near center", brightPixelCount(initBmp, 200..520) > 100)
+                assertEquals("Expanded landscape mode must have no left minimized orb", 0, brightPixelCount(initBmp, 4..44))
+                assertEquals("Expanded landscape mode must have no right detached search orb", 0, brightPixelCount(initBmp, 676..716))
+            } finally {
+                initBmp.close()
+                initImg.close()
+            }
+
+            // Collapse with spring animation and inspect mid-flight at 112ms.
+            isMinimized = true
+            for (ms in 16L..112L step 16L) {
+                scene.render(ms * 1_000_000L).close()
+            }
+            val midCollapseImg = scene.render(128_000_000L)
+            val midCollapseBmp = org.jetbrains.skia.Bitmap.makeFromImage(midCollapseImg)
+            try {
+                assertEquals("Landscape height must remain 48dp mid-collapse (no flash to portrait 56dp)", 48, barSize.height)
+                assertTrue(
+                    "Mid-collapse bar must smoothly pass through intermediate x=[60..175]",
+                    brightPixelCount(midCollapseBmp, 60..175) > 20,
+                )
+            } finally {
+                midCollapseBmp.close()
+                midCollapseImg.close()
+            }
+
+            // Settle at minimized state (800ms).
+            for (ms in 144L..800L step 16L) {
+                scene.render(ms * 1_000_000L).close()
+            }
+            val minImg = scene.render(816_000_000L)
+            val minBmp = org.jetbrains.skia.Bitmap.makeFromImage(minImg)
+            try {
+                assertEquals(48, barSize.height)
+                assertTrue("Minimized left orb must settle at x=[4..44]", brightPixelCount(minBmp, 4..44) > 20)
+                assertTrue("Minimized right search orb must settle at x=[676..716]", brightPixelCount(minBmp, 676..716) > 20)
+                assertEquals("Center gap must be empty when minimized", 0, brightPixelCount(minBmp, 220..500))
+            } finally {
+                minBmp.close()
+                minImg.close()
+            }
+
+            // Expand back with spring animation and verify mid-flight interpolation (no instant teleport).
+            isMinimized = false
+            for (ms in 832L..928L step 16L) {
+                scene.render(ms * 1_000_000L).close()
+            }
+            val midExpandImg = scene.render(944_000_000L)
+            val midExpandBmp = org.jetbrains.skia.Bitmap.makeFromImage(midExpandImg)
+            try {
+                assertEquals(48, barSize.height)
+                assertTrue(
+                    "Mid-expand bar must interpolate through x=[60..175] instead of jumping straight to center",
+                    brightPixelCount(midExpandBmp, 60..175) > 20,
+                )
+            } finally {
+                midExpandBmp.close()
+                midExpandImg.close()
+            }
+
+            // Settle back at expanded centered horizontal pill.
+            for (ms in 960L..1600L step 16L) {
+                scene.render(ms * 1_000_000L).close()
+            }
+            val settledImg = scene.render(1616_000_000L)
+            val settledBmp = org.jetbrains.skia.Bitmap.makeFromImage(settledImg)
+            try {
+                assertTrue(brightPixelCount(settledBmp, 200..520) > 100)
+                assertEquals(0, brightPixelCount(settledBmp, 4..44))
+                assertEquals(0, brightPixelCount(settledBmp, 676..716))
+            } finally {
+                settledBmp.close()
+                settledImg.close()
+            }
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
     fun wheelPickerRubberBandOverscrollAndFlingBounce() {
         assertEquals(0f, wheelRubberBandOffset(0f, 3f), 1e-4f)
         assertEquals(2.25f, wheelRubberBandOffset(2.25f, 3f), 1e-4f)
@@ -1489,5 +1615,349 @@ class LiquidComponentsTest {
         assertTrue("Vertical capsule center must be filled", pairSkia.contains(verticalCapsule.center.x, verticalCapsule.center.y))
         assertTrue("Adjacent circle center must be filled", pairSkia.contains(sideCircle.center.x, sideCircle.center.y))
         assertTrue("Bridge midpoint must be filled", pairSkia.contains(57f, 62f))
+    }
+
+    @Test
+    fun allSixLiquidListStylesAndCollapsibleSectionRenderCleanly() {
+        var expandedState by mutableStateOf(true)
+        var rowComposeCount = 0
+        for (style in LiquidListStyle.entries) {
+            rowComposeCount = 0
+            val scene = ImageComposeScene(width = 360, height = 280) {
+                LiquidListContainer(style = style) {
+                    LiquidListSection(
+                        title = "Section-${style.name}",
+                        footer = "Footer-${style.name}",
+                        expanded = expandedState,
+                        onToggleExpanded = { expandedState = !expandedState },
+                    ) {
+                        navigationRow("RowA", {})
+                        navigationRow("RowB", { rowComposeCount++ })
+                    }
+                }
+            }
+            try {
+                scene.render(1_000_000L).close()
+                expandedState = false
+                for (ms in 20L..320L step 30L) scene.render(ms * 1_000_000L).close()
+                expandedState = true
+                for (ms in 350L..650L step 30L) scene.render(ms * 1_000_000L).close()
+            } finally {
+                scene.close()
+            }
+        }
+        assertEquals(0, rowComposeCount)
+    }
+
+    @Test
+    fun singlePressHighlightPulsesOnceWithoutDoubleFlashingAfterRelease() {
+        val states = mutableListOf<Boolean>()
+        val source = androidx.compose.foundation.interaction.MutableInteractionSource()
+        val scene = ImageComposeScene(width = 200, height = 100) {
+            val active by rememberSinglePressHighlight(source, minFlashMillis = 100L)
+            if (states.lastOrNull() != active) states += active
+            Box(Modifier.size(200.dp, 100.dp))
+        }
+        try {
+            scene.render(1_000_000L).close()
+            val press = androidx.compose.foundation.interaction.PressInteraction.Press(Offset(50f, 50f))
+            assertTrue(source.tryEmit(press))
+            scene.render(20_000_000L).close()
+            Thread.sleep(125L)
+            assertTrue(source.tryEmit(androidx.compose.foundation.interaction.PressInteraction.Release(press)))
+            for (ms in 155L..260L step 25L) scene.render(ms * 1_000_000L).close()
+            // Transition must be strictly false -> true -> false (never true -> false -> true -> false).
+            assertEquals(listOf(false, true, false), states)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun menuMetricsWidthMatchesNarrowerIosProportionsAndTabsPickerRenders() {
+        val metrics = LiquidMenuMetrics(411.dp)
+        assertEquals(216f, metrics.width.value, 0.5f)
+
+        var selected by mutableStateOf("overview")
+        val scene = ImageComposeScene(width = 360, height = 120) {
+            LiquidTabsPicker(
+                options = listOf(
+                    LiquidTabOption("overview", "概览"),
+                    LiquidTabOption("design", "设计"),
+                    LiquidTabOption("test", "测试"),
+                ),
+                selectedId = selected,
+                onSelect = { selected = it },
+                modifier = Modifier.fillMaxWidth().padding(12.dp),
+            )
+        }
+        try {
+            scene.render(1_000_000L).close()
+            scene.render(16_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Press, Offset(180f, 30f))
+            scene.render(32_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Release, Offset(180f, 30f))
+            for (ms in 48L..240L step 24L) scene.render(ms * 1_000_000L).close()
+            assertEquals("design", selected)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun rectangleGlassSurfaceDarkShadowAndMeshGradientRenderCleanly() {
+        for (dark in listOf(false, true)) {
+            val scene = ImageComposeScene(width = 240, height = 200) {
+                LiquidGlassTheme(dark = dark) {
+                    val backdrop = rememberLayerBackdrop()
+                    Box(Modifier.fillMaxSize()) {
+                        LiquidMeshGradient(
+                            width = 2,
+                            height = 2,
+                            colors = listOf(Color(0xff007aff), Color(0xff00c7be), Color(0xffaf52de), Color(0xffff9500)),
+                            modifier = Modifier.fillMaxSize().layerBackdrop(backdrop),
+                        )
+                        LiquidGlassSurface(
+                            backdrop = backdrop,
+                            shape = RectangleShape,
+                            tint = Color(0xff00c7be),
+                            modifier = Modifier.align(Alignment.Center).size(140.dp, 54.dp),
+                        ) {
+                            BasicText("Rect")
+                        }
+                    }
+                }
+            }
+            try {
+                scene.render(1_000_000L).close()
+                scene.render(32_000_000L).close()
+            } finally {
+                scene.close()
+            }
+        }
+    }
+
+    @Test
+    fun sliderLeftwardDragMatchesSymmetricTravelAndSettlesOnRelease() {
+        var value by mutableStateOf(0.8f)
+        val scene = ImageComposeScene(width = 320, height = 100) {
+            val backdrop = rememberLayerBackdrop()
+            Box(Modifier.fillMaxSize().padding(16.dp)) {
+                Box(Modifier.matchParentSize().layerBackdrop(backdrop).background(Color.White))
+                LiquidSlider(
+                    value = { value },
+                    onValueChange = { value = it },
+                    valueRange = 0f..1f,
+                    visibilityThreshold = 0.005f,
+                    backdrop = backdrop,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+        try {
+            scene.render(1_000_000L).close()
+            val startX = 250f
+            scene.sendPointerEvent(PointerEventType.Press, Offset(startX, 40f))
+            scene.render(16_000_000L).close()
+            for (step in 1..6) {
+                scene.sendPointerEvent(PointerEventType.Move, Offset(startX - step * 25f, 40f))
+                scene.render((16L + step * 16L) * 1_000_000L).close()
+            }
+            scene.sendPointerEvent(PointerEventType.Release, Offset(100f, 40f))
+            for (ms in 120L..320L step 24L) scene.render(ms * 1_000_000L).close()
+            assertTrue("Leftward drag must move value below 0.6 (was $value)", value < 0.6f)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun toggleYieldsToVerticalScrollWithoutTogglingState() {
+        var checked by mutableStateOf(false)
+        val scene = ImageComposeScene(width = 200, height = 200) {
+            val backdrop = rememberLayerBackdrop()
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Box(Modifier.matchParentSize().layerBackdrop(backdrop).background(Color.White))
+                LiquidToggle(
+                    selected = { checked },
+                    onSelect = { checked = it },
+                    backdrop = backdrop,
+                )
+            }
+        }
+        try {
+            scene.render(1_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Press, Offset(100f, 100f))
+            scene.render(16_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Move, Offset(100f, 145f))
+            scene.render(32_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Move, Offset(100f, 190f))
+            scene.render(48_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Release, Offset(100f, 190f))
+            scene.render(80_000_000L).close()
+            assertFalse("Vertical scroll past touch slop must yield without toggling", checked)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun tabsPickerSupportsDarkLightRenderingAndClickSemantics() {
+        for (dark in listOf(false, true)) {
+            var selected by mutableStateOf("a")
+            val scene = ImageComposeScene(width = 300, height = 100) {
+                LiquidGlassTheme(dark = dark) {
+                    LiquidTabsPicker(
+                        options = listOf(
+                            LiquidTabOption("a", "First"),
+                            LiquidTabOption("b", "Second"),
+                        ),
+                        selectedId = selected,
+                        onSelect = { selected = it },
+                        modifier = Modifier.fillMaxWidth().padding(8.dp),
+                    )
+                }
+            }
+            try {
+                scene.render(1_000_000L).close()
+                scene.render(16_000_000L).close()
+                scene.sendPointerEvent(PointerEventType.Press, Offset(220f, 32f))
+                scene.render(32_000_000L).close()
+                scene.sendPointerEvent(PointerEventType.Release, Offset(220f, 32f))
+                for (ms in 48L..200L step 24L) scene.render(ms * 1_000_000L).close()
+                assertEquals("b", selected)
+            } finally {
+                scene.close()
+            }
+        }
+    }
+
+    @Test
+    fun modalHostBlocksBackgroundMenuWhileModalOpenAndAllowsSheetChildMenu() {
+        val bgMenu = LiquidMenuState { }
+        val sheetMenu = LiquidMenuState { }
+        var showSheet by mutableStateOf(true)
+        var triggerPos = Offset.Zero
+        val scene = ImageComposeScene(width = 360, height = 640) {
+            val bg = rememberLayerBackdrop()
+            LiquidModalHost(Modifier.fillMaxSize()) {
+                Box(Modifier.matchParentSize().layerBackdrop(bg).background(Color.White))
+                LiquidAnchoredMenuHost(
+                    state = bgMenu,
+                    backdrop = bg,
+                    items = listOf(LiquidMenuItem("bg", "BackgroundAction")),
+                ) {
+                    Box(
+                        Modifier
+                            .size(120.dp, 40.dp)
+                            .onGloballyPositioned { coords ->
+                                val r = coords.localToRoot(Offset(40f, 20f))
+                                triggerPos = r
+                            }
+                            .liquidMenuTrigger(bgMenu),
+                    )
+                }
+                if (showSheet) {
+                    LiquidSheet(
+                        onDismissRequest = { showSheet = false },
+                        backdrop = bg,
+                        title = "Sheet",
+                    ) {
+                        LiquidAnchoredMenuHost(
+                            state = sheetMenu,
+                            backdrop = LocalLiquidModalBackdrop.current ?: bg,
+                            items = listOf(LiquidMenuItem("sh", "SheetAction")),
+                        ) {
+                            Box(Modifier.size(120.dp, 40.dp).liquidMenuTrigger(sheetMenu)) {
+                                BasicText("OpenSheetMenu")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        try {
+            for (ms in 1L..80L step 16L) scene.render(ms * 1_000_000L).close()
+            // Tap where background menu trigger sits — modal scrim must block bgMenu from opening.
+            scene.sendPointerEvent(PointerEventType.Press, triggerPos)
+            scene.render(96_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Release, triggerPos)
+            scene.render(120_000_000L).close()
+            assertFalse("Background menu must not open while modal sheet is active", bgMenu.expanded)
+            sheetMenu.show()
+            for (ms in 140L..220L step 20L) scene.render(ms * 1_000_000L).close()
+            assertTrue("Sheet child menu must remain openable above the sheet", sheetMenu.expanded)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun swipeActionsWithoutLeadingAllowsRightwardSwipePassthrough() {
+        var boxOffsetX = 0f
+        val scene = ImageComposeScene(width = 360, height = 100) {
+            LiquidSwipeActions(
+                rowKey = "row1",
+                leading = emptyList(),
+                trailing = listOf(LiquidSwipeAction("Delete", LiquidSymbol.Trash, Color.Red) {}),
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .height(56.dp)
+                        .onGloballyPositioned { coords -> boxOffsetX = coords.localToRoot(Offset.Zero).x },
+                ) {
+                    BasicText("Row")
+                }
+            }
+        }
+        try {
+            scene.render(1_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Press, Offset(60f, 30f))
+            scene.render(16_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Move, Offset(180f, 30f))
+            scene.render(32_000_000L).close()
+            scene.sendPointerEvent(PointerEventType.Release, Offset(180f, 30f))
+            scene.render(64_000_000L).close()
+            assertEquals(0f, boxOffsetX, 0.5f)
+        } finally {
+            scene.close()
+        }
+    }
+
+    @Test
+    fun horizontalBarChartAndFormSectionMenuPickerRenderCleanly() {
+        var picked by mutableStateOf("Auto")
+        val scene = ImageComposeScene(width = 380, height = 340) {
+            val bg = rememberLayerBackdrop()
+            LiquidModalHost(Modifier.fillMaxSize()) {
+                Box(Modifier.matchParentSize().layerBackdrop(bg).background(Color.White))
+                Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                    LiquidBarChart(
+                        points = listOf(
+                            LiquidChartSeriesPoint("Jan", "A", 40f, Color(0xff007aff)),
+                            LiquidChartSeriesPoint("Feb", "A", 80f, Color(0xff00c7be)),
+                        ),
+                        horizontal = true,
+                    )
+                    LiquidFormSection(title = "Options") {
+                        row {
+                            LiquidMenuPicker(
+                                label = "Mode",
+                                options = listOf("Auto", "Manual"),
+                                selected = picked,
+                                onSelect = { picked = it },
+                                tint = Color(0xff007aff),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        try {
+            for (ms in 1L..80L step 20L) scene.render(ms * 1_000_000L).close()
+        } finally {
+            scene.close()
+        }
     }
 }
